@@ -63,11 +63,14 @@ protected:
     bool HandleChaseBehavior();
     void AttemptAttack();
 
+    bool CanAttackPlayer() const;
+
     /** Main patrol switch based on current settings */
     void HandlePatrolBehavior();
 
     void StopCurrentPatrol();
 
+    UMyAIPluginSettings* CachedSettings = nullptr;
 private:
 
     /** Pointer to player pawn */
