@@ -20,6 +20,7 @@ void ADebugUIManager::BeginPlay()
     Super::BeginPlay();
 
     RuntimeSettings = UMyAIPluginSettings::GetMutable();
+   
 
     if (!DebugWidgetClass)
     {
@@ -76,7 +77,7 @@ void ADebugUIManager::BeginPlay()
     EnableInput(PC);
     if (InputComponent)
     {
-        InputComponent->BindKey(EKeys::Tab, IE_Pressed, this, &ADebugUIManager::ToggleDebugUI);
+        InputComponent->BindKey(EKeys::T, IE_Pressed, this, &ADebugUIManager::ToggleDebugUI);
     }
 }
 
@@ -87,35 +88,25 @@ void ADebugUIManager::Tick(float DeltaTime)
 
 void ADebugUIManager::ToggleDebugUI()
 {
-    if (!DebugWidgetClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("DebugWidgetClass is not set."));
-        return;
-    }
-
-    if (!DebugWidget)
-    {
-        APlayerController* PC = GetLocalPlayerController();
-        if (!PC) return;
-
-        DebugWidget = CreateWidget<UDebugAISettingsWidget>(PC, DebugWidgetClass);
-        DebugWidget->AddToViewport(100);
-    }
+    if (!DebugWidgetClass || !DebugWidget) return;
 
     APlayerController* PC = GetLocalPlayerController();
-    if (!PC || !DebugWidget) return;
+    if (!PC) return;
 
     bIsVisible = !bIsVisible;
+
     DebugWidget->SetVisibility(bIsVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
 
     if (bIsVisible)
     {
         DebugWidget->SetFocus();
 
-        FInputModeUIOnly InputMode;
+        FInputModeGameAndUI InputMode;
+        InputMode.SetWidgetToFocus(DebugWidget->TakeWidget());
         InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+        InputMode.SetHideCursorDuringCapture(false); // optional: keep cursor
         PC->SetInputMode(InputMode);
-        PC->bShowMouseCursor = true;
+
 
         UE_LOG(LogTemp, Log, TEXT("Debug UI is now Visible"));
     }
@@ -124,10 +115,10 @@ void ADebugUIManager::ToggleDebugUI()
         PC->SetInputMode(FInputModeGameOnly());
         PC->bShowMouseCursor = false;
 
-        UE_LOG(LogTemp, Log, TEXT("Debug UI is now Hidden"));
+        UE_LOG(LogTemp, Warning, TEXT("Debug UI is now Hidden"));
+        UE_LOG(LogTemp, Warning, TEXT("Returned to Game Mode (Play Mode Resumed)"));
     }
 
-    // Call optional Blueprint event
     OnDebugToggled(bIsVisible);
 }
 
@@ -179,6 +170,8 @@ void ADebugUIManager::SetPatrolSpeed(float NewSpeed)
     if (RuntimeSettings)
     {
         RuntimeSettings->PatrolMoveSpeed = NewSpeed;
+        UE_LOG(LogTemp, Warning, TEXT("[DebugUIManager] Patrol Speed changed via slider: %.2f"), NewSpeed);
+        RefreshAIControllerPatrol();
     }
 }
 
@@ -187,6 +180,8 @@ void ADebugUIManager::SetPatrolInterval(float NewInterval)
     if (RuntimeSettings)
     {
         RuntimeSettings->PatrolInterval = NewInterval;
+        UE_LOG(LogTemp, Warning, TEXT("[DebugUIManager] Patrol Interval changed via slider: %.2f"), NewInterval);
+        RefreshAIControllerPatrol();
     }
 }
 
@@ -195,6 +190,8 @@ void ADebugUIManager::SetPatrolRadius(float NewRadius)
     if (RuntimeSettings)
     {
         RuntimeSettings->PatrolRadius = NewRadius;
+        UE_LOG(LogTemp, Warning, TEXT("[DebugUIManager] Patrol Radius changed via slider: %.2f"), NewRadius);
+        RefreshAIControllerPatrol();
     }
 }
 
@@ -203,6 +200,8 @@ void ADebugUIManager::SetPingPongSpline(bool bPingPong)
     if (RuntimeSettings)
     {
         RuntimeSettings->bUsePingPongSpline = bPingPong;
+        UE_LOG(LogTemp, Warning, TEXT("[DebugUIManager] PingPong Spline set to: %s"), bPingPong ? TEXT("True") : TEXT("False"));
+        RefreshAIControllerPatrol();
     }
 }
 
@@ -211,6 +210,8 @@ void ADebugUIManager::SetSplineWaitTime(float NewWaitTime)
     if (RuntimeSettings)
     {
         RuntimeSettings->SplineWaitTime = NewWaitTime;
+        UE_LOG(LogTemp, Warning, TEXT("[DebugUIManager] Spline Wait Time changed via slider: %.2f"), NewWaitTime);
+        RefreshAIControllerPatrol();
     }
 }
 
@@ -259,6 +260,14 @@ void ADebugUIManager::SetAttackCooldown(float Cooldown)
 APlayerController* ADebugUIManager::GetLocalPlayerController() const
 {
     return UGameplayStatics::GetPlayerController(GetWorld(), 0);
+}
+
+void ADebugUIManager::RefreshAIControllerPatrol()
+{
+    if (DebugAIControllerRef)
+    {
+        DebugAIControllerRef->RefreshPatrolMode();
+    }
 }
 
 
