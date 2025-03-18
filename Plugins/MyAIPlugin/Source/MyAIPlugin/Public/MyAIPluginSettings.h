@@ -48,7 +48,7 @@ public:
     bool bUsePingPongSpline = false;
 
     /** Default wait time at each spline point (can be overridden per point) */
-    UPROPERTY(EditAnywhere, Config, Category = "Patrolling|Spline", meta = (ClampMin = "1.0", ClampMax = "10.0"))
+    UPROPERTY(EditAnywhere, Config, Category = "Patrolling|Spline", meta = (ClampMin = "0.0", UIMin = "0.0"))
     float SplineWaitTime = 1.0f;
 
     /***********

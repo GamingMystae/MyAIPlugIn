@@ -1,4 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+
+#pragma once
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -8,8 +11,6 @@
 
 class UMyAIPluginSettings;
 class UDebugAISettingsWidget;
-class APlayerController;
-class AMyAIController;
 
 /**
  * Debug UI Manager: Toggles the AI Debug Widget and updates plugin settings at runtime.
@@ -85,9 +86,6 @@ public:
     UPROPERTY(EditAnywhere, Category = "UI", meta = (AllowPrivateAccess = "true"))
     TSubclassOf<UDebugAISettingsWidget> DebugWidgetClass;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    AMyAIController* DebugAIControllerRef;
-
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
@@ -105,5 +103,4 @@ private:
     bool bIsVisible = false;
 
     APlayerController* GetLocalPlayerController() const;
-    void RefreshAIControllerPatrol();
 };
