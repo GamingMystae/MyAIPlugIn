@@ -1,0 +1,53 @@
+
+# Unreal Engine C++ project .gitignore
+
+# Compiled binary output
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Optional backup folders
+*.VC.db
+.vscode/
+.vs/
+.idea/
+
+# Build artifacts
+*.xcodeproj
+*.xcworkspace
+*.sln
+*.opensdf
+*.sdf
+*.suo
+*.log
+*.user
+*.userprefs
+
+# Mac-specific
+.DS_Store
+
+# Windows-specific
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Cache / debug folders
+*.pdb
+*.obj
+*.pch
+*.ipch
+
+# Plugin packaging
+*.target
+*.gch
+
+# Unreal autosaves and backups
+Backup/
+Autosaves/
+
+# Optional: ignore local config overrides (remove this if you want to sync config)
+Config/DefaultEditorPerProjectUserSettings.ini
+Config/DefaultEditor.ini
+Config/DefaultEngine.ini
