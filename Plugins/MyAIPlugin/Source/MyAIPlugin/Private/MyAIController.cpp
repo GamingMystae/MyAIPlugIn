@@ -33,146 +33,204 @@ AMyAIController::AMyAIController()
     CurrentSplineIndex = 0;
 }
 
-FString AMyAIController::GetCurrentAIStateAsString() const
-{
-    return UEnum::GetValueAsString(CurrentAIState);
-}
-
 void AMyAIController::BeginPlay()
 {
     Super::BeginPlay();
 
-    InitializeCurrentPatrolMode();
- 
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
+    CachedSettings = UMyAIPluginSettings::GetMutable();
+    if (!CachedSettings) return;
+
     PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    
-    CurrentPatrolMode = Settings->PatrolMode;
+    CurrentPatrolMode = CachedSettings->PatrolMode;
 
     ACharacter* MyCharacter = Cast<ACharacter>(GetPawn());
     ANPC_Character* NPC = Cast<ANPC_Character>(MyCharacter);
 
-    if (Settings->bEnableDebugLogs)
+    if (CachedSettings->bEnableDebugLogs)
     {
         UE_LOG(LogTemp, Warning, TEXT("MyAIController Initialized!"));
     }
-    UE_LOG(LogTemp, Warning, TEXT("Starting Patrol Mode: %s"),
-        *UEnum::GetValueAsString(Settings->DefaultCombatStyle));
 
-    if (MyCharacter && Settings->bEnablePatrol)
+    if (MyCharacter && CachedSettings->bEnablePatrol)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Starting Patrol Mode: %s"),
-            *UEnum::GetValueAsString(Settings->PatrolMode));
-
-        if (Settings->bEnableDebugLogs)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("AI Character Controlled by MyAIController: %s"), *MyCharacter->GetName());
-        }
-
         if (NPC)
         {
             PatrolPath = NPC->PatrolPath;
             SplinePath = NPC->SplinePath;
-
-            if (Settings->PatrolMode == EPatrolMode::EPM_Waypoints && PatrolPath)
-            {
-                InitializePatrolPath();
-            }
-
-            if (Settings->PatrolMode == EPatrolMode::EPM_Spline && SplinePath)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Spline Path Set: %s"), *SplinePath->GetName());
-            }
         }
 
-        MyCharacter->GetCharacterMovement()->MaxWalkSpeed = Settings->PatrolMoveSpeed;
+        MyCharacter->GetCharacterMovement()->MaxWalkSpeed = CachedSettings->PatrolMoveSpeed;
 
-        GetWorldTimerManager().SetTimer(
-            PatrolTimerHandle,
-            this,
-            &AMyAIController::TickBehavior,
-            Settings->PatrolInterval,
-            true
-        );
+        RefreshPatrolMode(); 
+
+        if (!GetWorldTimerManager().IsTimerActive(PatrolTimerHandle))
+        {
+            GetWorldTimerManager().SetTimer(
+                PatrolTimerHandle,
+                this,
+                &AMyAIController::TickBehavior,
+                CachedSettings->PatrolInterval,
+                true
+            );
+        }
     }
 }
 
-void AMyAIController::RefreshPatrolMode()
+
+void AMyAIController::TickBehavior()
 {
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-    if (!Settings || !GetPawn()) return;
+    UE_LOG(LogTemp, Warning, TEXT("[AI] TickBehavior - PatrolMode: %s"),
+        *UEnum::GetValueAsString(CurrentPatrolMode));
 
-    StopCurrentPatrol();
- 
-    CurrentPatrolIndex = 0;
-    CurrentSplineIndex = 0;
-    bWasChasing = false;
-    bReverseSpline = false;
-
-    // Assign mode based on settings
-    CurrentPatrolMode = Settings->PatrolMode;
-
-    ANPC_Character* NPC = Cast<ANPC_Character>(GetPawn());
-    if (NPC)
-    {
-        PatrolPath = NPC->PatrolPath;
-        SplinePath = NPC->SplinePath;
-    }
-
-    if (Settings->PatrolMode == EPatrolMode::EPM_Waypoints && PatrolPath)
-    {
-        InitializePatrolPath();
-    }
+    if (!CachedSettings || !GetPawn()) return;
 
     ACharacter* MyCharacter = Cast<ACharacter>(GetPawn());
     if (MyCharacter)
     {
-        MyCharacter->GetCharacterMovement()->MaxWalkSpeed = Settings->PatrolMoveSpeed;
+        MyCharacter->GetCharacterMovement()->MaxWalkSpeed = CachedSettings->PatrolMoveSpeed;
     }
-
-    TickBehavior();
-}
-
-void AMyAIController::InitializePatrolPath()
-{
-    if (!PatrolPath) {
-        UE_LOG(LogTemp, Warning, TEXT("[AI] InitializePatrolPath failed — PatrolPath is NULL"));
-        return;
-    }
-
-    PatrolPoints = PatrolPath->PatrolPoints;
-
-    if (const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-        Settings && Settings->bEnableDebugLogs)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[AI] Patrol Path Initialized with %d points from: %s"),
-            PatrolPoints.Num(), *PatrolPath->GetName());
-    }
-}
-
-void AMyAIController::TickBehavior()
-{
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-    if (!Settings || !GetPawn()) return;
 
     if (HandleChaseBehavior()) return;
 
     if (bWasChasing)
     {
         bWasChasing = false;
-
-        if (Settings->bEnableDebugLogs)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("[AI] Player lost. Returning to patrol."));
-        }
+        UE_LOG(LogTemp, Warning, TEXT("[AI] Player lost. Returning to patrol."));
     }
 
     HandlePatrolBehavior();
 }
 
+
+void AMyAIController::HandlePatrolBehavior()
+{
+    if (!CachedSettings || !GetPawn()) return;
+
+    CurrentAIState = EAIState::EAIS_Patrolling;
+
+    switch (CurrentPatrolMode)
+    {
+    case EPatrolMode::EPM_Waypoints:
+        HandleWaypointPatrol();
+        break;
+
+    case EPatrolMode::EPM_Spline:
+        HandleSplinePatrol();
+        break;
+
+    case EPatrolMode::EPM_Random:
+    default:
+        HandleRandomPatrol();
+        break;
+    }
+}
+
+
+bool AMyAIController::HandleChaseBehavior()
+{
+   // const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
+    APawn* ControlledPawn = GetPawn();
+    if (!CachedSettings || !PlayerPawn || !ControlledPawn) return false;
+    if (CachedSettings->DefaultCombatStyle == EAICombatStyle::EAIC_Passive) return false;
+
+    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), ControlledPawn->GetActorLocation());
+
+    if (Distance <= CachedSettings->ChaseDistance)
+    {
+        if (CurrentAIState != EAIState::EAIS_Chasing)
+        {
+            CurrentAIState = EAIState::EAIS_Chasing;
+            bWasChasing = true;
+
+            if (CachedSettings->bEnableDebugLogs)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("[AI] State: Chasing Player | Distance: %.2f"), Distance);
+            }
+        }
+
+        MoveToActor(PlayerPawn);
+        AttemptAttack();
+        return true;
+    }
+
+    return false;
+}
+
+void AMyAIController::AttemptAttack()
+{
+    if (!CanAttackPlayer() || !CachedSettings || !PlayerPawn) return;
+
+    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), GetPawn()->GetActorLocation());
+
+    if (Distance <= CachedSettings->AttackRange)
+    {
+        CurrentAIState = EAIState::EAIS_Attacking;
+
+        if (CachedSettings->bEnableDebugLogs)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Attacking Player! Distance: %f"), Distance);
+        }
+
+        bCanAttack = false;
+        GetWorldTimerManager().SetTimer(
+            AttackTimerHandle,
+            [this]() { bCanAttack = true; },
+            CachedSettings->AttackCooldown,
+            false
+        );
+
+        DrawDebugSphere(
+            GetWorld(),
+            GetPawn()->GetActorLocation(),
+            CachedSettings->AttackRange,
+            12,
+            FColor::Red,
+            false,
+            1.0f);
+    }
+}
+
+bool AMyAIController::CanAttackPlayer() const
+{
+    //const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
+    if (!CachedSettings) return false;
+
+    if (CachedSettings->DefaultCombatStyle == EAICombatStyle::EAIC_Passive) return false;
+    if (CachedSettings->DefaultCombatStyle == EAICombatStyle::EAIC_Defensive && !bWasChasing) return false;
+    return true;
+}
+
+void AMyAIController::HandleRandomPatrol()
+{
+    UNavigationSystemV1* NavSystem = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (!NavSystem) return;
+
+    if (!CachedSettings) return;
+    FVector Destination;
+    if (NavSystem->K2_GetRandomReachablePointInRadius(GetWorld(), GetPawn()->GetActorLocation(), Destination, CachedSettings->PatrolRadius))
+    {
+        if (CachedSettings->bEnableDebugLogs)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[AI] Patrolling to random location: %s"), *Destination.ToString());
+        }
+
+        //MoveToLocation(Destination);
+        if (FVector::Dist(GetPawn()->GetActorLocation(), Destination) > 100.f) {
+            MoveToLocation(Destination);
+        }
+    }
+}
+
+void AMyAIController::HandleWaypointPatrol()
+{
+    if (PatrolPoints.Num() == 0) return;
+    
+        MoveToNextPatrolPoint();
+    
+}
+
 void AMyAIController::MoveToNextPatrolPoint()
 {
-    const UMyAIPluginSettings* Settings = GetDefault<UMyAIPluginSettings>();
     if (PatrolPoints.Num() == 0) return;
 
     AActor* Target = PatrolPoints[CurrentPatrolIndex];
@@ -180,34 +238,38 @@ void AMyAIController::MoveToNextPatrolPoint()
 
     MoveToActor(Target);
 
-    float WaitTime = Settings->PatrolInterval;
-
-    if (PatrolPath && PatrolPath->PatrolWaitTimes.IsValidIndex(CurrentPatrolIndex))
+    if (CachedSettings->bEnableDebugLogs)
     {
-        float CustomWait = PatrolPath->PatrolWaitTimes[CurrentPatrolIndex];
-        if (CustomWait > 0.f) WaitTime = CustomWait;
+        UE_LOG(LogTemp, Warning, TEXT("[AI] Moving to Patrol Point %d: %s"),
+            CurrentPatrolIndex, *Target->GetName());
     }
 
-    if (Settings->bEnableDebugLogs)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[AI] Moving to Patrol Point %d: %s (Wait: %.1fs)"),
-            CurrentPatrolIndex, *Target->GetName(), WaitTime);
-    }
+    // Advance index — no wait, patrol timer controls pacing
+    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
+}
 
-    GetWorldTimerManager().SetTimer(
-        WaypointWaitTimerHandle,
-        this,
-        &AMyAIController::AdvancePatrolIndex,
-        WaitTime,
-        false
-    );
+
+void AMyAIController::AdvancePatrolIndex()
+{
+    if (PatrolPoints.Num() == 0) return;
+
+    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
+    MoveToNextPatrolPoint();
+}
+
+void AMyAIController::HandleSplinePatrol()
+{
+    if (!GetWorldTimerManager().IsTimerActive(SplineWaitTimerHandle))
+    {
+        MoveToNextSplinePoint();
+    }
 }
 
 void AMyAIController::MoveToNextSplinePoint()
 {
     if (!SplinePath || !SplinePath->SplineComponent) return;
 
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
+    //const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
     USplineComponent* Spline = SplinePath->SplineComponent;
 
     int32 NumPoints = Spline->GetNumberOfSplinePoints();
@@ -216,13 +278,13 @@ void AMyAIController::MoveToNextSplinePoint()
     FVector NextPoint = Spline->GetLocationAtSplinePoint(CurrentSplineIndex, ESplineCoordinateSpace::World);
     MoveToLocation(NextPoint);
 
-    float WaitTime = Settings->SplineWaitTime;
+    float WaitTime = CachedSettings->SplineWaitTime;
     if (SplinePath->WaitTimes.IsValidIndex(CurrentSplineIndex))
     {
         WaitTime = SplinePath->WaitTimes[CurrentSplineIndex];
     }
 
-    if (Settings->bEnableDebugLogs)
+    if (CachedSettings->bEnableDebugLogs)
     {
         UE_LOG(LogTemp, Warning, TEXT("[AI] Moving to spline point %d: %s (Wait: %.1fs)"),
             CurrentSplineIndex, *NextPoint.ToString(), WaitTime);
@@ -241,12 +303,12 @@ void AMyAIController::AdvanceSplineIndex()
 {
     if (!SplinePath || !SplinePath->SplineComponent) return;
 
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
+    //const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
     USplineComponent* Spline = SplinePath->SplineComponent;
     int32 NumPoints = Spline->GetNumberOfSplinePoints();
     if (NumPoints < 2) return;
 
-    if (Settings->bUsePingPongSpline)
+    if (CachedSettings->bUsePingPongSpline)
     {
         bReverseSpline ? CurrentSplineIndex-- : CurrentSplineIndex++;
         if (CurrentSplineIndex >= NumPoints)
@@ -268,84 +330,95 @@ void AMyAIController::AdvanceSplineIndex()
     MoveToNextSplinePoint();
 }
 
-void AMyAIController::AdvancePatrolIndex()
+void AMyAIController::RefreshPatrolMode()
 {
-    if (PatrolPoints.Num() == 0) return;
+    if (!CachedSettings || !GetPawn()) return;
 
-    CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-    MoveToNextPatrolPoint();
-}
+    StopCurrentPatrol(); // clears all timers
 
-bool AMyAIController::HandleChaseBehavior()
-{
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-    APawn* ControlledPawn = GetPawn();
-    if (!Settings || !PlayerPawn || !ControlledPawn) return false;
-    if (Settings->DefaultCombatStyle == EAICombatStyle::EAIC_Passive) return false;
+    // Assign mode immediately
+    CurrentPatrolMode = CachedSettings->PatrolMode;
 
-    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), ControlledPawn->GetActorLocation());
+    UE_LOG(LogTemp, Warning, TEXT("[AI] Refreshed patrol mode: %s"),
+        *UEnum::GetValueAsString(CurrentPatrolMode));
 
-    if (Distance <= Settings->ChaseDistance)
+    // Reset state
+    CurrentAIState = EAIState::EAIS_Patrolling;
+    CurrentPatrolIndex = 0;
+    CurrentSplineIndex = 0;
+    bWasChasing = false;
+    bReverseSpline = false;
+
+    ANPC_Character* NPC = Cast<ANPC_Character>(GetPawn());
+    if (NPC)
     {
-        if (CurrentAIState != EAIState::EAIS_Chasing)
-        {
-            CurrentAIState = EAIState::EAIS_Chasing;
-            bWasChasing = true;
-
-            if (Settings->bEnableDebugLogs)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("[AI] State: Chasing Player | Distance: %.2f"), Distance);
-            }
-        }
-
-        MoveToActor(PlayerPawn);
-        AttemptAttack();
-        return true;
+        PatrolPath = NPC->PatrolPath;
+        SplinePath = NPC->SplinePath;
     }
 
-    return false;
-}
-
-void AMyAIController::HandlePatrolBehavior()
-{
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-   // if (!Settings->bEnablePatrol) return;
-    if (!Settings || !GetPawn()) return;
-   // CurrentPatrolMode = Settings->PatrolMode;
-
-    CurrentAIState = EAIState::EAIS_Patrolling;
-
-    switch (Settings->PatrolMode)
+    if (CurrentPatrolMode == EPatrolMode::EPM_Waypoints)
     {
-    case EPatrolMode::EPM_Waypoints:
-        HandleWaypointPatrol();
-        break;
+        if (PatrolPath)
+        {
+            InitializePatrolPath();
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("[AI] No PatrolPath set for Waypoint Mode!"));
+        }
+    }
+    else if (CurrentPatrolMode == EPatrolMode::EPM_Spline)
+    {
+        if (SplinePath)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Spline Path Set: %s"), *SplinePath->GetName());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("[AI] No SplinePath set for Spline Mode!"));
+        }
+    }
 
-    case EPatrolMode::EPM_Spline:
-        HandleSplinePatrol();
-        break;
+    ACharacter* MyCharacter = Cast<ACharacter>(GetPawn());
+    if (MyCharacter)
+    {
+        MyCharacter->GetCharacterMovement()->MaxWalkSpeed = CachedSettings->PatrolMoveSpeed;
+    }
 
-    case EPatrolMode::EPM_Random:
-    default:
-        HandleRandomPatrol();
-        break;
+    // Restart patrol timer
+    if (!GetWorldTimerManager().IsTimerActive(PatrolTimerHandle))
+    {
+        GetWorldTimerManager().SetTimer(
+            PatrolTimerHandle,
+            this,
+            &AMyAIController::TickBehavior,
+            CachedSettings->PatrolInterval,
+            true
+        );
     }
 }
 
 void AMyAIController::StopCurrentPatrol()
 {
     StopMovement();
+
+    if (GetWorldTimerManager().IsTimerActive(PatrolTimerHandle))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[AI] Stopping Patrol Timer."));
+    }
+
     GetWorldTimerManager().ClearTimer(PatrolTimerHandle);
     GetWorldTimerManager().ClearTimer(WaypointWaitTimerHandle);
     GetWorldTimerManager().ClearTimer(SplineWaitTimerHandle);
 }
 
+
 void AMyAIController::InitializeCurrentPatrolMode()
 {
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-    if (!Settings || !GetPawn()) return;
-
-    switch (Settings->PatrolMode)
+    //const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
+    if (!CachedSettings || !GetPawn()) return;
+    CurrentPatrolMode = CachedSettings->PatrolMode;
+    switch (CurrentPatrolMode)
     {
     case EPatrolMode::EPM_Waypoints:
         if (PatrolPath) InitializePatrolPath();
@@ -364,76 +437,23 @@ void AMyAIController::InitializeCurrentPatrolMode()
     }
 }
 
-void AMyAIController::HandleWaypointPatrol()
+void AMyAIController::InitializePatrolPath()
 {
-    if (PatrolPoints.Num() == 0) return;
+    if (!PatrolPath) {
+        UE_LOG(LogTemp, Warning, TEXT("[AI] InitializePatrolPath failed — PatrolPath is NULL"));
+        return;
+    }
 
-    if (!GetWorldTimerManager().IsTimerActive(WaypointWaitTimerHandle))
+    PatrolPoints = PatrolPath->PatrolPoints;
+
+    if (CachedSettings && CachedSettings->bEnableDebugLogs)
     {
-        MoveToNextPatrolPoint();
+        UE_LOG(LogTemp, Warning, TEXT("[AI] Patrol Path Initialized with %d points from: %s"),
+            PatrolPoints.Num(), *PatrolPath->GetName());
     }
 }
 
-void AMyAIController::HandleSplinePatrol()
+FString AMyAIController::GetCurrentAIStateAsString() const
 {
-    if (!GetWorldTimerManager().IsTimerActive(SplineWaitTimerHandle))
-    {
-        MoveToNextSplinePoint();
-    }
-}
-
-void AMyAIController::HandleRandomPatrol()
-{
-    UNavigationSystemV1* NavSystem = UNavigationSystemV1::GetCurrent(GetWorld());
-    if (!NavSystem) return;
-
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-    FVector Destination;
-    if (NavSystem->K2_GetRandomReachablePointInRadius(GetWorld(), GetPawn()->GetActorLocation(), Destination, Settings->PatrolRadius))
-    {
-        if (Settings->bEnableDebugLogs)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("[AI] Patrolling to random location: %s"), *Destination.ToString());
-        }
-
-        MoveToLocation(Destination);
-    }
-}
-
-void AMyAIController::AttemptAttack()
-{
-    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-    if (!Settings || !Settings->bEnableAttack || !bCanAttack || !PlayerPawn) return;
-
-    if (Settings->DefaultCombatStyle == EAICombatStyle::EAIC_Passive) return;
-    if (Settings->DefaultCombatStyle == EAICombatStyle::EAIC_Defensive && !bWasChasing) return;
-
-    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), GetPawn()->GetActorLocation());
-
-    if (Distance <= Settings->AttackRange)
-    {
-        CurrentAIState = EAIState::EAIS_Attacking;
-
-        if (Settings->bEnableDebugLogs)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Attacking Player! Distance: %f"), Distance);
-        }
-
-        bCanAttack = false;
-        GetWorldTimerManager().SetTimer(
-            AttackTimerHandle,
-            [this]() { bCanAttack = true; },
-            Settings->AttackCooldown,
-            false
-        );
-
-        DrawDebugSphere(
-            GetWorld(),
-            GetPawn()->GetActorLocation(),
-            Settings->AttackRange,
-            12,
-            FColor::Red,
-            false,
-            1.0f);
-    }
+    return UEnum::GetValueAsString(CurrentAIState);
 }
