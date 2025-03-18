@@ -66,6 +66,8 @@ protected:
     /** Main patrol switch based on current settings */
     void HandlePatrolBehavior();
 
+    void StopCurrentPatrol();
+
 private:
 
     /** Pointer to player pawn */
@@ -85,6 +87,9 @@ private:
 
     UPROPERTY(VisibleAnywhere)
     EPatrolMode CurrentPatrolState;
+
+    EPatrolMode CurrentPatrolMode;
+    void InitializeCurrentPatrolMode();
 
     UPROPERTY(VisibleAnywhere)
     EAICombatStyle CurrentCombatState;

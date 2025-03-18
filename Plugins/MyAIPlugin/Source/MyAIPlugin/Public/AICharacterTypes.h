@@ -22,6 +22,7 @@ enum class EAIState : uint8
 UENUM(BlueprintType)
 enum class EPatrolMode : uint8
 {
+	EPM_None    UMETA(DisplayName = "None"),
 	EPM_Random    UMETA(DisplayName = "Random"),
 	EPM_Waypoints UMETA(DisplayName = "Waypoints"),
 	EPM_Spline    UMETA(DisplayName = "Spline Path")

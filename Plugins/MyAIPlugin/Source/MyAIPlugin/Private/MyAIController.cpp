@@ -42,8 +42,12 @@ void AMyAIController::BeginPlay()
 {
     Super::BeginPlay();
 
+    InitializeCurrentPatrolMode();
+ 
     const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
     PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    
+    CurrentPatrolMode = Settings->PatrolMode;
 
     ACharacter* MyCharacter = Cast<ACharacter>(GetPawn());
     ANPC_Character* NPC = Cast<ANPC_Character>(MyCharacter);
@@ -52,9 +56,14 @@ void AMyAIController::BeginPlay()
     {
         UE_LOG(LogTemp, Warning, TEXT("MyAIController Initialized!"));
     }
+    UE_LOG(LogTemp, Warning, TEXT("Starting Patrol Mode: %s"),
+        *UEnum::GetValueAsString(Settings->DefaultCombatStyle));
 
     if (MyCharacter && Settings->bEnablePatrol)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Starting Patrol Mode: %s"),
+            *UEnum::GetValueAsString(Settings->PatrolMode));
+
         if (Settings->bEnableDebugLogs)
         {
             UE_LOG(LogTemp, Warning, TEXT("AI Character Controlled by MyAIController: %s"), *MyCharacter->GetName());
@@ -93,15 +102,15 @@ void AMyAIController::RefreshPatrolMode()
     const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
     if (!Settings || !GetPawn()) return;
 
-    StopMovement();
-    GetWorldTimerManager().ClearTimer(PatrolTimerHandle);
-    GetWorldTimerManager().ClearTimer(WaypointWaitTimerHandle);
-    GetWorldTimerManager().ClearTimer(SplineWaitTimerHandle);
-
+    StopCurrentPatrol();
+ 
     CurrentPatrolIndex = 0;
     CurrentSplineIndex = 0;
     bWasChasing = false;
     bReverseSpline = false;
+
+    // Assign mode based on settings
+    CurrentPatrolMode = Settings->PatrolMode;
 
     ANPC_Character* NPC = Cast<ANPC_Character>(GetPawn());
     if (NPC)
@@ -300,7 +309,9 @@ bool AMyAIController::HandleChaseBehavior()
 void AMyAIController::HandlePatrolBehavior()
 {
     const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
-    if (!Settings->bEnablePatrol) return;
+   // if (!Settings->bEnablePatrol) return;
+    if (!Settings || !GetPawn()) return;
+   // CurrentPatrolMode = Settings->PatrolMode;
 
     CurrentAIState = EAIState::EAIS_Patrolling;
 
@@ -309,12 +320,46 @@ void AMyAIController::HandlePatrolBehavior()
     case EPatrolMode::EPM_Waypoints:
         HandleWaypointPatrol();
         break;
+
     case EPatrolMode::EPM_Spline:
         HandleSplinePatrol();
         break;
+
     case EPatrolMode::EPM_Random:
     default:
         HandleRandomPatrol();
+        break;
+    }
+}
+
+void AMyAIController::StopCurrentPatrol()
+{
+    StopMovement();
+    GetWorldTimerManager().ClearTimer(PatrolTimerHandle);
+    GetWorldTimerManager().ClearTimer(WaypointWaitTimerHandle);
+    GetWorldTimerManager().ClearTimer(SplineWaitTimerHandle);
+}
+
+void AMyAIController::InitializeCurrentPatrolMode()
+{
+    const UMyAIPluginSettings* Settings = UMyAIPluginSettings::GetMutable();
+    if (!Settings || !GetPawn()) return;
+
+    switch (Settings->PatrolMode)
+    {
+    case EPatrolMode::EPM_Waypoints:
+        if (PatrolPath) InitializePatrolPath();
+        break;
+
+    case EPatrolMode::EPM_Spline:
+        if (SplinePath)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Spline Path Set: %s"), *SplinePath->GetName());
+        }
+        break;
+
+    case EPatrolMode::EPM_Random:
+    default:
         break;
     }
 }
