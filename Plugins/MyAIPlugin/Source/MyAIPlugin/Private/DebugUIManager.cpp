@@ -139,21 +139,18 @@ void ADebugUIManager::SetPatrolStyle(EPatrolMode NewMode)
     if (RuntimeSettings)
     {
         RuntimeSettings->PatrolMode = NewMode;
+
         UE_LOG(LogTemp, Warning, TEXT("[DebugUIManager] Patrol mode set to %s"),
             *UEnum::GetValueAsString(NewMode));
+    }
 
-        // Refresh patrol for local pawn
-        APlayerController* PC = GetLocalPlayerController();
-        if (PC)
-        {
-            APawn* ControlledPawn = PC->GetPawn();
-            if (AMyAIController* AIController = Cast<AMyAIController>(ControlledPawn->GetController()))
-            {
-                AIController->RefreshPatrolMode();
-            }
-        }
+    //Use the stored reference to your AI controller
+    if (DebugWidget && DebugWidget->DebugAIControllerRef)
+    {
+        DebugWidget->DebugAIControllerRef->RefreshPatrolMode();
     }
 }
+
 
 void ADebugUIManager::SetEnableDebugLogs(bool bEnabled)
 {
